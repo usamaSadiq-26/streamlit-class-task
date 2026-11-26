@@ -20,7 +20,7 @@ st.info(
 
 @st.cache_data
 def load_data():
-    return pd.read_csv("hypertension_dataset_5000.csv")
+    return pd.read_csv("cleaned_hypertension_dataset.csv")
 
 
 try:
@@ -155,10 +155,12 @@ if page == "Data Overview":
             """
             **Preprocessing explanation**
 
-            - Missing values and duplicate records were checked.
-            - Categorical variables were reviewed for inconsistent labels.
-            - Numerical variables were examined using statistical summaries.
-            - The cleaned dataset was used for the analysis.
+            - Duplicate records were removed.
+            - Text labels were trimmed and standardized.
+            - Missing categorical values were retained as "Unknown".
+            - Missing numerical values were replaced with each column median.
+            - Numeric values outside the clinical validation ranges were replaced.
+            - No missing values or duplicate rows remain in the cleaned file.
             """
         )
 
