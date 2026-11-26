@@ -1,543 +1,570 @@
-import io
-
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
+import io
 
+
+# --------------------------------------------------
+# 1. PAGE SETUP
+# --------------------------------------------------
+
+st.set_page_config(
+    page_title="Hypertension Risk Analytics",
+    page_icon="❤️",
+    layout="wide"
+)
+
+st.title("Hypertension Risk Analytics Dashboard")
+
+st.write(
+    "This application explores hypertension patterns "
+    "using a cleaned dataset of 5,000 patient records."
+)
+
+st.info(
+    "This application is designed for population-level "
+    "exploration and research. It is not a diagnostic tool."
+)
+
+
+# --------------------------------------------------
+# 2. LOAD DATASET
+# --------------------------------------------------
 
 @st.cache_data
 def load_data():
-    data = pd.read_csv("cleaned_hypertension_dataset.csv")
-
-    data["Sex"] = data["Gender_Male"].map({True: "Male", False: "Female"})
-    data["Hypertension_Status"] = data["Hypertension_Yes"].map(
-        {True: "Hypertensive", False: "Not hypertensive"}
-    )
-    data["Age_Group"] = pd.cut(
-        data["Age"],
-        bins=[0, 39, 49, 59, 69, 120],
-        labels=["<40", "40-49", "50-59", "60-69", "70+"],
-        include_lowest=True,
-    )
-    return data
+    return pd.read_csv("hypertension_dataset_5000.csv")
 
 
-def decode_one_hot(data, prefix, column_labels=None):
-    columns = [column for column in data.columns if column.startswith(prefix)]
-    decoded = pd.Series("Not recorded", index=data.index, dtype="object")
-    for column in columns:
-        label = column.removeprefix(prefix)
-        if column_labels:
-            label = column_labels.get(label, label)
-        decoded.loc[data[column].fillna(False)] = label
-    return decoded
+try:
+    df = load_data()
+
+except FileNotFoundError:
+    st.error("Dataset file not found. Check your file name.")
+    st.stop()
 
 
-df = load_data()
+# --------------------------------------------------
+# 3. IDENTIFY IMPORTANT COLUMNS
+# --------------------------------------------------
 
-st.set_page_config(
-    page_title="Hypertension Population Explorer",
-    page_icon=":material/favorite:",
-    layout="wide",
-)
+column_names = {
+    col.lower().strip(): col for col in df.columns
+}
 
-st.title("Hypertension Population Explorer")
-st.info(
-    "This application helps explore population patterns in a cleaned hypertension "
-    "dataset. It is for exploratory review and is not an individual diagnostic "
-    "or prediction tool."
-)
+age_col = column_names.get("age")
+htn_col = column_names.get("htn_flag")
+
+if htn_col is None:
+    htn_col = column_names.get("hypertension")
+
+gender_col = column_names.get("gender")
+
+if gender_col is None:
+    gender_col = column_names.get("sex")
+
+categorical_variables = df.select_dtypes(
+    include=["object", "category"]
+).columns.tolist()
+
+numerical_variables = df.select_dtypes(
+    include="number"
+).columns.tolist()
+
+
+# Convert hypertension flag to numeric
+
+if htn_col is not None:
+    htn_values = df[htn_col].copy()
+
+    if htn_values.dtype == "object":
+        htn_values = htn_values.astype(str).str.strip().str.lower().map(
+            {"yes": 1, "no": 0}
+        )
+    else:
+        htn_values = pd.to_numeric(htn_values, errors="coerce")
+else:
+    htn_values = None
+
+
+# --------------------------------------------------
+# 4. SIDEBAR
+# --------------------------------------------------
+
+st.sidebar.title("Hypertension Dashboard")
 
 page = st.sidebar.radio(
     "Select Section",
-    ["Data Overview", "Interactive Exploration"],
+    [
+        "Data Overview",
+        "Interactive Exploration"
+    ]
 )
 
+
+# --------------------------------------------------
+# 5. DATA OVERVIEW
+# --------------------------------------------------
+
 if page == "Data Overview":
-    st.subheader("Population at a glance")
 
-    hypertension_count = int(df["Hypertension_Yes"].sum())
-    hypertension_prevalence = df["Hypertension_Yes"].mean() * 100
-    stage_2_count = int(df["BP_Category_Stage 2 Hypertension"].sum())
-    male_count = int(df["Gender_Male"].sum())
+    st.header("Data Overview")
 
-    metric1, metric2, metric3, metric4 = st.columns(4)
-    metric1.metric("Patient records", f"{len(df):,}")
-    metric2.metric("Hypertension prevalence", f"{hypertension_prevalence:.1f}%")
-    metric3.metric("Stage 2 BP records", f"{stage_2_count:,}")
-    metric4.metric(
-        "Age range",
-        f"{df['Age'].min():.1f}-{df['Age'].max():.1f}",
+    st.write(
+        "Explore the dataset, patient population, "
+        "data quality and summary visualisations."
     )
 
-    col1, col2 = st.columns([1.15, 1])
 
-    with col1:
-        bp_categories = pd.DataFrame(
-            {
-                "Blood pressure category": [
-                    "Normal",
-                    "Stage 1 hypertension",
-                    "Stage 2 hypertension",
-                ],
-                "Patient count": [
-                    int(df["BP_Category_Normal"].sum()),
-                    int(df["BP_Category_Stage 1 Hypertension"].sum()),
-                    stage_2_count,
-                ],
-            }
-        )
-        fig = px.bar(
-            bp_categories,
-            x="Blood pressure category",
-            y="Patient count",
-            text="Patient count",
-            color="Blood pressure category",
-            title="Blood pressure category distribution",
-        )
-        fig.update_layout(showlegend=False, height=420)
-        st.plotly_chart(fig, use_container_width=True)
+    # --------------------------------------------------
+    # 5.1 DATAFRAME PREVIEW
+    # --------------------------------------------------
 
-    with col2:
-        st.markdown("**Clinical population context**")
-        st.write(
-            f"- **{hypertension_count:,}** of **{len(df):,}** records "
-            f"({hypertension_prevalence:.1f}%) are classified as hypertensive."
-        )
-        st.write(
-            f"- **{male_count:,}** records are male "
-            f"({male_count / len(df) * 100:.1f}%)."
-        )
-        st.write(
-            f"- Median age is **{df['Age'].median():.1f} years** "
-            f"and most records are from adults aged "
-            f"{df['Age'].min():.1f}-{df['Age'].max():.1f}."
-        )
-        st.write(
-            "These high-level measures identify the population size, outcome burden "
-            "and age context before staff explore relationships."
-        )
+    st.subheader("Dataset Preview")
 
-    st.subheader("Dataframe preview")
     rows_to_show = st.selectbox(
         "Number of rows to display",
-        [5, 10, 20, 50, 100],
-        index=0,
+        [5, 10, 20, 50, 100]
     )
-    st.dataframe(df.head(rows_to_show), use_container_width=True)
 
-    st.subheader("Dataset structure")
+    st.dataframe(
+        df.head(rows_to_show),
+        use_container_width=True
+    )
+
+
+    # --------------------------------------------------
+    # 5.2 DATASET STRUCTURE
+    # --------------------------------------------------
+
+    st.subheader("Dataset Structure")
+
     col1, col2 = st.columns(2)
-    col1.metric("Number of Rows", df.shape[0])
-    col2.metric("Number of Columns", df.shape[1])
 
-    categorical_variables = df.select_dtypes(
-        include=["object", "category", "bool"]
-    ).columns.tolist()
-    numerical_variables = df.select_dtypes(
-        include="number"
-    ).columns.tolist()
+    col1.metric(
+        "Number of Rows",
+        df.shape[0]
+    )
 
-    st.write("**Numerical variables:**", ", ".join(numerical_variables))
-    st.write("**Categorical variables:**", ", ".join(categorical_variables))
+    col2.metric(
+        "Number of Columns",
+        df.shape[1]
+    )
+
+    st.write("Column Names")
+    st.write(df.columns.tolist())
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("Numerical Variables")
+        st.write(numerical_variables)
+
+    with col2:
+        st.write("Categorical Variables")
+        st.write(categorical_variables)
+
+
+    # --------------------------------------------------
+    # 5.3 DATASET INFORMATION
+    # --------------------------------------------------
+
+    st.subheader("Dataset Information")
 
     with st.expander("View Dataset Information"):
+
         buffer = io.StringIO()
-        df.drop(columns=["Sex", "Age_Group", "Hypertension_Status"]).info(
-            buf=buffer
-        )
-        st.text(buffer.getvalue())
+
+        df.info(buf=buffer)
+
+        info_text = buffer.getvalue()
+
+        st.text(info_text)
+
+
+    # --------------------------------------------------
+    # 5.4 STATISTICAL SUMMARY
+    # --------------------------------------------------
 
     st.subheader("Statistical Summary")
+
     st.dataframe(
-        df[numerical_variables].describe().T,
-        use_container_width=True,
+        df.describe().T,
+        use_container_width=True
     )
 
-    with st.expander("Data Quality and Preprocessing"):
-        missing_count = int(df.isna().sum().sum())
-        duplicate_count = int(df.duplicated().sum())
-        st.write(
-            f"- The cleaned application dataset contains **{missing_count} missing "
-            f"values** and **{duplicate_count} duplicate rows**."
-        )
-        st.write(
-            "- Original category labels have been converted to one-hot encoded "
-            "columns in the cleaned file."
-        )
-        st.write(
-            "- Age, BMI and blood-pressure values remain numerical, with sex and "
-            "hypertension status decoded as readable labels for display."
-        )
-        st.write(
-            "- Age bands (<40, 40-49, 50-59, 60-69, 70+) were derived only to "
-            "support population comparison."
-        )
-        st.write(
-            "These checks matter because missing, duplicated or inconsistent records "
-            "could distort prevalence estimates and group comparisons."
-        )
 
-else:
-    st.subheader("Interactive Exploration")
+    # --------------------------------------------------
+    # 5.5 POPULATION SUMMARY METRICS
+    # --------------------------------------------------
 
-    st.markdown("**Population filters**")
-    age_options = sorted(
-        {
-            int(df["Age"].min()),
-            *range(20, 90, 10),
-            int(df["Age"].max()),
-        }
+    st.subheader("Population Summary")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Total Records",
+        f"{len(df):,}"
     )
-    age_options = [
-        value for value in age_options
-        if df["Age"].min() <= value <= df["Age"].max()
+
+    if htn_values is not None:
+
+        valid_htn = htn_values.dropna()
+
+        htn_cases = int((valid_htn == 1).sum())
+
+        prevalence = (
+            (valid_htn == 1).sum() / len(valid_htn) * 100
+            if len(valid_htn) > 0 else 0
+        )
+
+        col2.metric(
+            "Hypertension Cases",
+            f"{htn_cases:,}"
+        )
+
+        col3.metric(
+            "Hypertension Prevalence",
+            f"{prevalence:.1f}%"
+        )
+
+    else:
+        col2.metric("Hypertension Cases", "N/A")
+        col3.metric("Hypertension Prevalence", "N/A")
+
+
+    if age_col is not None:
+
+        median_age = pd.to_numeric(
+            df[age_col], errors="coerce"
+        ).median()
+
+        col4.metric(
+            "Median Age",
+            f"{median_age:.1f} years"
+            if pd.notna(median_age) else "N/A"
+        )
+
+    else:
+
+        col4.metric("Median Age", "N/A")
+
+
+    # Gender distribution
+
+    if gender_col is not None:
+
+        st.write("Gender Distribution")
+
+        gender_summary = (
+            df[gender_col]
+            .value_counts()
+            .reset_index()
+        )
+
+        gender_summary.columns = [
+            "Gender",
+            "Number of Records"
+        ]
+
+        st.dataframe(
+            gender_summary,
+            use_container_width=True
+        )
+
+
+    # --------------------------------------------------
+    # 5.6 DATA QUALITY AND PREPROCESSING
+    # --------------------------------------------------
+
+    st.subheader("Data Quality and Preprocessing")
+
+    with st.expander("View Data Quality Checks"):
+
+        st.write("Missing Values")
+
+        missing_values = df.isnull().sum()
+
+        missing_table = pd.DataFrame({
+            "Column": missing_values.index,
+            "Missing Values": missing_values.values,
+            "Missing Percentage": (
+                missing_values.values / len(df) * 100
+            ).round(2)
+        })
+
+        st.dataframe(
+            missing_table,
+            use_container_width=True
+        )
+
+
+        st.write("Duplicate Records")
+
+        duplicate_count = df.duplicated().sum()
+
+        st.write(
+            f"Total duplicate rows: {duplicate_count}"
+        )
+
+
+        st.write("Data Types")
+
+        st.dataframe(
+            df.dtypes.astype(str).rename("Data Type"),
+            use_container_width=True
+        )
+
+
+        st.write("Category Standardisation")
+
+        for col in categorical_variables:
+
+            if df[col].dtype == "object":
+
+                extra_spaces = (
+                    df[col].dropna().astype(str)
+                    != df[col].dropna().astype(str).str.strip()
+                ).sum()
+
+                st.write(
+                    f"{col}: {extra_spaces} values "
+                    "contain extra spaces."
+                )
+
+
+        st.write(
+            """
+            **Preprocessing explanation**
+
+            - Missing values were checked in all columns.
+            - Duplicate records were checked.
+            - Categorical variables were reviewed for inconsistent labels.
+            - Numerical variables were examined using statistical summaries.
+            - The cleaned dataset was used for the analysis.
+
+            These checks help improve data quality and make
+            the results easier to interpret.
+            """
+        )
+
+
+    # --------------------------------------------------
+    # 5.7 BASELINE PLOTLY VISUALISATIONS
+    # --------------------------------------------------
+
+    st.subheader("Population Visualisations")
+
+    st.write(
+        "The following charts provide a basic understanding "
+        "of the patient population."
+    )
+
+
+    # Chart 1: Hypertension distribution
+
+    if htn_values is not None:
+
+        status_data = pd.DataFrame({
+            "Hypertension Status": htn_values.map({
+                0: "No Hypertension",
+                1: "Hypertension"
+            })
+        }).dropna()
+
+        status_summary = (
+            status_data["Hypertension Status"]
+            .value_counts()
+            .reset_index()
+        )
+
+        status_summary.columns = [
+            "Hypertension Status",
+            "Number of Records"
+        ]
+
+        fig1 = px.bar(
+            status_summary,
+            x="Hypertension Status",
+            y="Number of Records",
+            title="Hypertension Status Distribution",
+            text="Number of Records"
+        )
+
+        fig1.update_layout(
+            xaxis_title="Hypertension Status",
+            yaxis_title="Number of Records"
+        )
+
+        st.plotly_chart(
+            fig1,
+            use_container_width=True
+        )
+
+
+    # Chart 2: Age distribution
+
+    if age_col is not None:
+
+        age_data = pd.to_numeric(
+            df[age_col], errors="coerce"
+        ).dropna()
+
+        fig2 = px.histogram(
+            x=age_data,
+            nbins=20,
+            title="Age Distribution of the Population",
+            labels={
+                "x": "Age",
+                "y": "Number of Records"
+            }
+        )
+
+        st.plotly_chart(
+            fig2,
+            use_container_width=True
+        )
+
+
+    # --------------------------------------------------
+    # PART 4 - CREATE BMI CATEGORIES
+    # --------------------------------------------------
+
+    df["BMI_Category"] = pd.cut(
+        df["BMI"],
+        bins=[0, 18.5, 25, 30, float("inf")],
+        labels=[
+            "Underweight",
+            "Normal",
+            "Overweight",
+            "Obese"
+        ],
+        right=False
+    )
+
+    st.subheader("BMI Category Distribution")
+
+    bmi_summary = (
+        df["BMI_Category"]
+        .value_counts(sort=False)
+        .reset_index()
+    )
+
+    bmi_summary.columns = [
+        "BMI Category",
+        "Number of Records"
     ]
 
-    filter1, filter2, filter3 = st.columns(3)
-    with filter1:
-        minimum_age = st.selectbox(
-            "Minimum age",
-            age_options,
-            index=0,
-        )
-    with filter2:
-        maximum_age = st.selectbox(
-            "Maximum age",
-            age_options,
-            index=len(age_options) - 1,
-        )
-    with filter3:
-        sex_options = ["Female", "Male"]
-        selected_sexes = st.multiselect(
-            "Select sex",
-            sex_options,
-            default=sex_options,
+    st.dataframe(
+        bmi_summary,
+        use_container_width=True
+    )
+
+    fig = px.bar(
+        bmi_summary,
+        x="BMI Category",
+        y="Number of Records",
+        title="Population Distribution by BMI Category",
+        text="Number of Records"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+
+# --------------------------------------------------
+# INTERACTIVE EXPLORATION PAGE
+# --------------------------------------------------
+
+elif page == "Interactive Exploration":
+
+    st.header("Interactive Exploration")
+
+    st.write(
+        "Explore hypertension patterns using different "
+        "variables and interactive charts."
+    )
+
+    st.subheader("Filter Patient Population by Age")
+
+    age_values = sorted(df["Age"].dropna().unique())
+
+    minimum_value = st.selectbox(
+        "Minimum Age",
+        age_values,
+        index=0
+    )
+
+    maximum_value = st.selectbox(
+        "Maximum Age",
+        age_values,
+        index=len(age_values) - 1
+    )
+
+    if minimum_value <= maximum_value:
+
+        filtered_df = df[
+            (df["Age"] >= minimum_value) &
+            (df["Age"] <= maximum_value)
+        ]
+
+        st.write(
+            f"Number of records: {len(filtered_df)}"
         )
 
-    if minimum_age > maximum_age:
+        st.dataframe(
+            filtered_df,
+            use_container_width=True
+        )
+
+    else:
+
         st.warning(
-            "Minimum age is greater than maximum age. "
-            "Please choose a minimum age that is no greater than the maximum."
+            "Maximum age must be greater than or equal to minimum age."
         )
         st.stop()
 
-    if not selected_sexes:
-        st.warning("Select at least one sex to display an analysis.")
-        st.stop()
+    st.subheader("Categorical Filtering")
 
-    filtered_df = df[
-        (df["Age"] >= minimum_age)
-        & (df["Age"] <= maximum_age)
-        & (df["Sex"].isin(selected_sexes))
-    ].copy()
+    gender_options = sorted(
+        filtered_df["Gender"].dropna().unique().tolist()
+    )
+
+    selected_groups = st.multiselect(
+        "Select Gender Group(s)",
+        gender_options,
+        default=gender_options
+    )
+
+    filtered_df = filtered_df[
+        filtered_df["Gender"].isin(selected_groups)
+    ]
+
+    st.write(
+        f"Total records after filtering: {len(filtered_df)}"
+    )
 
     if filtered_df.empty:
         st.warning(
-            "No records match the selected age and sex filters. "
-            "Broaden the selection to continue."
+            "No records match the selected filters."
         )
         st.stop()
 
-    st.caption(
-        f"{len(filtered_df):,} records remain after applying the population filters."
+    st.info(
+        "Explore population patterns only. "
+        "This application is not a diagnostic tool."
     )
 
-    analysis_type = st.radio(
-        "Choose Analysis Type",
-        ["Univariate", "Bivariate", "Multivariate"],
-        horizontal=True,
-    )
 
-    if analysis_type == "Univariate":
-        variable_type = st.radio(
-            "Variable type",
-            ["Numerical", "Categorical"],
-            horizontal=True,
-        )
+# --------------------------------------------------
+# 6. FOOTER
+# --------------------------------------------------
 
-        if variable_type == "Numerical":
-            numerical_options = [
-                "Age",
-                "BMI",
-                "Waist_Circumference_cm",
-                "Sleep_Hours",
-                "Creatinine_mg_dL",
-                "Fasting_Glucose_mg_dL",
-                "Cholesterol_mg_dL",
-                "Systolic_BP_mmHg",
-                "Diastolic_BP_mmHg",
-            ]
-            variable = st.selectbox(
-                "Select Numerical Variable",
-                numerical_options,
-            )
-            fig = px.histogram(
-                filtered_df,
-                x=variable,
-                nbins=20,
-                title=f"Distribution of {variable}",
-                labels={variable: variable.replace("_", " ")},
-            )
-            fig.update_layout(height=460)
-            st.plotly_chart(fig, use_container_width=True)
-            st.write(
-                f"This histogram shows the distribution of "
-                f"{variable.replace('_', ' ').lower()} for the {len(filtered_df):,} "
-                "records matching the selected filters."
-            )
+st.divider()
 
-        else:
-            categorical_options = {
-                "Sex": ("direct", "Sex"),
-                "Hypertension status": ("direct", "Hypertension_Status"),
-                "BP category": (
-                    "one_hot",
-                    "BP_Category",
-                    {
-                        "Normal": "Normal",
-                        "Stage 1 Hypertension": "Stage 1",
-                        "Stage 2 Hypertension": "Stage 2",
-                    },
-                ),
-                "Physical activity": (
-                    "one_hot",
-                    "Physical_Activity",
-                ),
-                "Stress level": (
-                    "one_hot",
-                    "Stress_Level",
-                ),
-                "Salt intake": (
-                    "one_hot",
-                    "Salt_Intake",
-                ),
-            }
-            category_label = st.selectbox(
-                "Select Categorical Variable",
-                list(categorical_options),
-            )
-            category_definition = categorical_options[category_label]
-
-            if category_definition[0] == "direct":
-                counts = (
-                    filtered_df[category_definition[1]]
-                    .value_counts()
-                    .rename_axis("Category")
-                    .reset_index(name="Count")
-                )
-            else:
-                labels = category_definition[2] if len(category_definition) == 3 else None
-                decoded = decode_one_hot(
-                    filtered_df,
-                    category_definition[1] + "_",
-                    labels,
-                )
-                counts = (
-                    decoded.value_counts()
-                    .rename_axis("Category")
-                    .reset_index(name="Count")
-                )
-
-            fig = px.bar(
-                counts,
-                x="Category",
-                y="Count",
-                text="Count",
-                title=f"Distribution of {category_label}",
-            )
-            fig.update_layout(height=460)
-            st.plotly_chart(fig, use_container_width=True)
-            st.write(
-                f"This chart compares the number of records in each "
-                f"{category_label.lower()} category within the filtered population."
-            )
-
-    elif analysis_type == "Bivariate":
-        bivariate_type = st.radio(
-            "Relationship type",
-            ["Numerical vs numerical", "Population group vs hypertension outcome"],
-            horizontal=True,
-        )
-
-        if bivariate_type == "Numerical vs numerical":
-            numerical_options = [
-                "Age",
-                "BMI",
-                "Waist_Circumference_cm",
-                "Sleep_Hours",
-                "Creatinine_mg_dL",
-                "Fasting_Glucose_mg_dL",
-                "Cholesterol_mg_dL",
-                "Systolic_BP_mmHg",
-                "Diastolic_BP_mmHg",
-            ]
-            x_col1, x_col2 = st.columns(2)
-            with x_col1:
-                x_variable = st.selectbox(
-                    "Select X Variable",
-                    numerical_options,
-                    index=0,
-                )
-            with x_col2:
-                y_variable = st.selectbox(
-                    "Select Y Variable",
-                    numerical_options,
-                    index=1,
-                )
-
-            fig = px.scatter(
-                filtered_df,
-                x=x_variable,
-                y=y_variable,
-                title=f"{x_variable} vs {y_variable}",
-                labels={
-                    x_variable: x_variable.replace("_", " "),
-                    y_variable: y_variable.replace("_", " "),
-                },
-            )
-            fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
-
-            correlation = filtered_df[x_variable].corr(filtered_df[y_variable])
-            st.metric("Correlation", f"{correlation:.2f}")
-            st.write(
-                "This scatter plot shows the direction and strength of the "
-                "association in the selected population; correlation does not "
-                "establish causation."
-            )
-
-        else:
-            group_options = {
-                "Sex": ("direct", "Sex"),
-                "Age group": ("direct", "Age_Group"),
-                "Physical activity": (
-                    "one_hot",
-                    "Physical_Activity",
-                ),
-                "Stress level": (
-                    "one_hot",
-                    "Stress_Level",
-                ),
-                "Salt intake": (
-                    "one_hot",
-                    "Salt_Intake",
-                ),
-                "Smoking status": (
-                    "one_hot",
-                    "Smoking_Status",
-                ),
-                "Family history": (
-                    "one_hot",
-                    "Family_History",
-                    {"HTN_Yes": "Yes"},
-                ),
-            }
-            group_label = st.selectbox(
-                "Select population group",
-                list(group_options),
-            )
-            group_definition = group_options[group_label]
-
-            if group_definition[0] == "direct":
-                plot_df = filtered_df[
-                    [group_definition[1], "Hypertension_Status"]
-                ].copy()
-                plot_df = plot_df.rename(
-                    columns={group_definition[1]: "Population group"}
-                )
-            else:
-                labels = group_definition[2] if len(group_definition) == 3 else None
-                plot_df = pd.DataFrame(
-                    {
-                        "Population group": decode_one_hot(
-                            filtered_df,
-                            group_definition[1] + "_",
-                            labels,
-                        ),
-                        "Hypertension_Status": filtered_df["Hypertension_Status"],
-                    }
-                )
-
-            percentage_table = (
-                pd.crosstab(
-                    plot_df["Population group"],
-                    plot_df["Hypertension_Status"],
-                    normalize="index",
-                )
-                * 100
-            ).reset_index()
-
-            if "Hypertensive" not in percentage_table:
-                percentage_table["Hypertensive"] = 0.0
-
-            fig = px.bar(
-                percentage_table,
-                x="Population group",
-                y="Hypertensive",
-                text=percentage_table["Hypertensive"].map(
-                    lambda value: f"{value:.1f}%"
-                ),
-                title=f"Hypertension prevalence by {group_label.lower()}",
-                labels={"Hypertensive": "Hypertension prevalence (%)"},
-            )
-            fig.update_layout(yaxis_range=[0, 100], yaxis_ticksuffix="%", height=460)
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.write(
-                f"The chart recalculates hypertension percentages for each "
-                f"{group_label.lower()} category using only the currently filtered "
-                f"{len(filtered_df):,} records."
-            )
-
-    else:
-        multivariate_numerical = [
-            "Age",
-            "BMI",
-            "Waist_Circumference_cm",
-            "Sleep_Hours",
-            "Fasting_Glucose_mg_dL",
-            "Cholesterol_mg_dL",
-            "Systolic_BP_mmHg",
-            "Diastolic_BP_mmHg",
-        ]
-        multi1, multi2 = st.columns(2)
-        with multi1:
-            x_variable = st.selectbox(
-                "Select X Variable",
-                multivariate_numerical,
-                index=0,
-                key="multivariate_x",
-            )
-        with multi2:
-            y_variable = st.selectbox(
-                "Select Y Variable",
-                multivariate_numerical,
-                index=1,
-                key="multivariate_y",
-            )
-
-        fig = px.scatter(
-            filtered_df,
-            x=x_variable,
-            y=y_variable,
-            color="Hypertension_Status",
-            title=f"{x_variable} vs {y_variable}, coloured by hypertension status",
-            labels={
-                x_variable: x_variable.replace("_", " "),
-                y_variable: y_variable.replace("_", " "),
-            },
-        )
-        fig.update_layout(height=500)
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.write(
-            "This multivariate view combines two numerical measurements with "
-            "hypertension status as a colour group. It helps users compare whether "
-            "the two measurements differ across the outcome in the filtered population."
-        )
-
-    st.caption(
-        "Population patterns only: the findings should not be used for individual "
-        "diagnosis or prediction."
-    )
+st.caption(
+    "Hypertension Risk Analytics Dashboard | "
+    "Programming for Data Analysis"
+)
